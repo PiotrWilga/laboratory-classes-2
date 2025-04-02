@@ -1,97 +1,86 @@
-const fileSystem = require("fs");
+const path = require("path");
+const fs = require("fs");
 const { STATUS_CODE } = require("../constants/statusCode");
+const express = require("express");
+const router = express.Router();
 
-const productRouting = (request, response) => {
-  const { url, method } = request;
+const FILE_PATH = path.join(__dirname, "../products.json");
 
-  if (url.includes("add") && method === "GET") {
-    return renderAddProductPage(response);
-  }
+// Middleware do obsługi danych z formularza
+router.use(express.urlencoded({ extended: true }));
 
-  if (url.includes("add") && method === "POST") {
-    return addNewProduct(request, response);
-  }
+// Obsługa GET /product/add - zwraca stronę formularza
+router.get("/add", (req, res) => {
+  res.sendFile(path.join(__dirname, "../views", "add-product.html"));
+});
 
-  if (url.includes("new")) {
-    return renderNewProductPage(response);
-  }
+// Obsługa POST /product/add - zapisuje produkt i przekierowuje
+router.post("/add", (req, res) => {
+  const newProduct = {
+    name: req.body.productName || "Unknown",
+    price: req.body.productPrice || "0.00",
+  };
 
-  console.warn(`ERROR: requested url ${url} doesn't exist.`);
-  return;
-};
+  // Odczyt pliku JSON, jeśli nie istnieje, tworzymy nową tablicę
+  fs.readFile(FILE_PATH, "utf-8", (err, data) => {
+    let products = [];
+    
+    if (!err) {
+      try {
+        products = JSON.parse(data);
+      } catch (parseErr) {
+        console.error("Błąd parsowania JSON:", parseErr);
+      }
+    }
 
-const renderAddProductPage = (response) => {
-  response.setHeader("Content-Type", "text/html");
-  response.write("<html>");
-  response.write("<head><title>Shop - Add product</title></head>");
-  response.write("<body>");
-  response.write("<h1>Add product</h1>");
-  response.write("<form action='/product/add' method='POST'>");
-  response.write(
-    "<br /><label>Name<br /><input type='text' name='name'></label>"
-  );
-  response.write(
-    "<br /><label>Description<br /><input type='text' name='description'></label>"
-  );
-  response.write("<br /><button type='submit'>Add</button>");
-  response.write("</form>");
-  response.write(
-    "<nav><a href='/'>Home</a><br /><a href='/product/new'>Newest product</a><br /><a href='/logout'>Logout</a></nav>"
-  );
-  response.write("</body>");
-  response.write("</html>");
+    products.push(newProduct);
 
-  return response.end();
-};
+    // Zapis nowej wersji pliku
+    fs.writeFile(FILE_PATH, JSON.stringify(products, null, 2), (writeErr) => {
+      if (writeErr) {
+        console.error("Błąd zapisu JSON:", writeErr);
+        return res.status(STATUS_CODE.INTERNAL_SERVER_ERROR).send("Błąd zapisu danych.");
+      }
 
-const renderNewProductPage = (response) => {
-  fileSystem.readFile("./product.txt", "utf-8", (err, data) => {
-    response.setHeader("Content-Type", "text/html");
-    response.write("<html>");
-    response.write("<head><title>Shop - Newest product</title></head>");
-    response.write("<body>");
-    response.write("<h1>Newest product</h1>");
-    response.write(
+      res.redirect("/product/new"); // Przekierowanie do nowego produktu
+    });
+  });
+});
+
+// Obsługa GET /product/new - odczyt i wyświetlenie najnowszego produktu
+router.get("/new", (req, res) => {
+  fs.readFile(FILE_PATH, "utf-8", (err, data) => {
+    res.setHeader("Content-Type", "text/html");
+    res.write("<html>");
+    res.write("<head><title>Shop - Newest product</title></head>");
+    res.write("<body>");
+    res.write("<h1>Newest product</h1>");
+    res.write(
       "<nav><a href='/'>Home</a><br /><a href='/product/add'>Add product</a><br /><a href='/logout'>Logout</a></nav>"
     );
 
-    if (err) {
-      response.write("<br /><div>No new products available.</div>");
+    if (err || !data) {
+      res.write("<br /><div>No new products available.</div>");
     } else {
-      response.write(`<br /><div>New product data - ${splittedData}</div>`);
+      let products = [];
+      try {
+        products = JSON.parse(data);
+      } catch (parseErr) {
+        console.error("Błąd parsowania JSON:", parseErr);
+      }
+
+      if (products.length > 0) {
+        const newestProduct = products[products.length - 1];
+        res.write(`<br /><div>New product: ${newestProduct.name} - Price: ${newestProduct.price} zł</div>`);
+      } else {
+        res.write("<br /><div>No new products available.</div>");
+      }
     }
 
-    response.write("</body>");
-    response.write("</html>");
-
-    return response.end();
+    res.write("</body>");
+    res.write("</html>");
+    res.end();
   });
-};
+});
 
-const addNewProduct = (request, response) => {
-  const body = [];
-  request.on("data", (chunk) => {
-    body.push(chunk);
-  });
-  request.on("end", () => {
-    const parsedBody = Buffer.concat(body).toString();
-    const formData = parsedBody.split("&").map((entry) => {
-      const [key, value] = entry.split("=");
-
-      return `${key}: ${decodeURIComponent(value)}`;
-    });
-
-    fileSystem.writeFile(
-      "product.txt",
-      `${formData[0]}, ${formData[1]}`,
-      (err) => {
-        response.statusCode = STATUS_CODE.FOUND;
-        response.setHeader("Location", "/product/new");
-
-        return response.end();
-      }
-    );
-  });
-};
-
-module.exports = { productRouting };
+module.exports = router;
